@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Viewer</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="../style.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
+</head>
+<body>
+    <div id="leftwrapper">
+        <div class="header">
+            <h2>Gesture Bond</h2>
+        </div>
+        <div class="main-content-inner">
+            <div>Teachable Machine Pose Model</div>
+            <button type="button" onclick="init()">Start</button>
+            <div><canvas id="canvas"></canvas></div>
+            <div id="label-container"></div>
+            <div>
+                <img src="./images/male.gif" class="images active left-images" id="left-0">
+                <img src="./images/hi-male.gif" class="images left-images" id="left-1">
+                <img src="./images/thumbs-up-male.gif" class="images left-images" id="left-2">
+                <img src="./images/hamza.gif" class="images left-images" id="left-3">
+            </div>
+        </div>
+
+        <div class="sidebar-wrapper" id="sidebar">
+            <div class="header-content">
+                <div class="chat-header">
+                    <h5>Messages</h5>
+                    <button id="close-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="chat-messages">
+                    <!-- Messages will be displayed here -->
+                </div>
+                <div class="chat-footer">
+                    <textarea placeholder="Type your message..."></textarea>
+                    <button><i class="fa fa-paper-plane"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bootstrap Bundle with Popper -->
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+        <script src="../app.js"></script>
+        <script type="text/javascript">
+            // More API functions here:
+            // https://github.com/googlecreativelab/teachablemachine-community/tree/master/libraries/pose
+
+            // the link to your model provided by Teachable Machine export panel
+            const URL = "https://teachablemachine.withgoogle.com/models/FUaFvtrPj/";
+            let model, webcam, ctx, labelContainer, maxPredictions;
+
+            async function init() {
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+
+                // load the model and metadata
+                model = await tmPose.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                // Convenience function to setup a webcam
+                const size = 200;
+                const flip = true; // whether to flip the webcam
+                webcam = new tmPose.Webcam(size, size, flip); // width, height, flip
+                await webcam.setup(); // request access to the webcam
+                await webcam.play();
+                window.requestAnimationFrame(loop);
+
+                // append/get elements to the DOM
+                const canvas = document.getElementById("canvas");
+                canvas.width = size; canvas.height = size;
+                ctx = canvas.getContext("2d");
+                labelContainer = document.getElementById("label-container");
+                for (let i = 0; i < maxPredictions; i++) { // and class labels
+                    labelContainer.appendChild(document.createElement("div"));
+                }
+            }
+
+            async function loop(timestamp) {
+                webcam.update(); // update the webcam frame
+                await predict();
+                window.requestAnimationFrame(loop);
+            }
+
+            async function predict() {
+                // Prediction #1: run input through posenet
+                // estimatePose can take in an image, video or canvas html element
+                const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+                // Prediction 2: run input through teachable machine classification model
+                const prediction = await model.predict(posenetOutput);
+
+                let maxClassIndex = -1;
+                let maxClassProbability = 0;
+
+                // Mapping of class names to their corresponding image IDs
+                const classToImageMap = {
+                    "No Gesture": "left-0",
+                    "Hand Raised": "left-1",
+                    "Thumbs Up": "left-2",
+                    "Heart Shape": "left-3"
+                };
+
+                console.log(prediction); // Log predictions for debugging
+
+                for (let i = 0; i < maxPredictions; i++) {
+                    const classPrediction =
+                        prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+                    labelContainer.childNodes[i].innerHTML = classPrediction;
+
+                    // Check if the current class has the highest probability
+                    if (prediction[i].probability > 0.5 && prediction[i].probability > maxClassProbability) {
+                        maxClassProbability = prediction[i].probability;
+                        maxClassIndex = i;
+                    }
+                }
+
+                // Update the active image based on the highest probability class
+                if (maxClassIndex !== -1) {
+                    const activeClassName = prediction[maxClassIndex].className;
+                    const activeImageId = classToImageMap[activeClassName];
+
+                    if (activeImageId) {
+                        for (let i = 0; i < 4; i++) { // We have 4 images, update the loop range
+                            const imageElement = document.getElementById(`left-${i}`);
+                            if (`left-${i}` === activeImageId) {
+                                imageElement.classList.add('active');
+                            } else {
+                                imageElement.classList.remove('active');
+                            }
+                        }
+                    }
+                } else {
+                    // If no class probability is greater than 0.5, ensure default image is active
+                    for (let i = 0; i < 4; i++) { // We have 4 images, update the loop range
+                        const imageElement = document.getElementById(`left-${i}`);
+                        if (i === 0) {
+                            imageElement.classList.add('active');
+                        } else {
+                            imageElement.classList.remove('active');
+                        }
+                    }
+                }
+
+                // Draw the pose on the canvas
+                drawPose(pose);
+            }
+
+            function drawPose(pose) {
+                if (webcam.canvas) {
+                    ctx.drawImage(webcam.canvas, 0, 0);
+                    // draw the keypoints and skeleton
+                    if (pose) {
+                        const minPartConfidence = 0.5
+                        ; tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
+                        tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+                    }
+                }
+            }
+
+            window.addEventListener("load", init);
+        </script>
+    </div>
+</body>
+</html>
